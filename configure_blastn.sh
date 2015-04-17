@@ -1,0 +1,1 @@
+export PATH=/projects/btl/arch/ncbi-blast-2.2.29+/bin/:$PATH
