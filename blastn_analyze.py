@@ -16,7 +16,8 @@ def run_blastn(query, reference, outdir, percid, outfile):
     blastn = Popen(['blastn', '-query', query, '-db', reference, '-out', outfile, \
                     '-best_hit_overhang', '0.2', \
                     '-outfmt', '7', \
-                    '-perc_identity', percid, '-evalue', '1e-50', '-num_threads', '12'])
+                    '-perc_identity', percid, '-evalue', '1e-50', '-num_threads', '12'], stderr=PIPE)
+    blastn.communicate()
 
 def filter_query(infile, matchfile):
     """Filter out self to self hit and no hit"""
@@ -24,9 +25,14 @@ def filter_query(infile, matchfile):
     print ">>> Filter query self to self hit and no hit"
     print('>>> Run shell cmd "grep -vw ^# *.blastn | awk $1 != $2 > *matchfile*"')
     grep = Popen(['grep', '-vw', '^#', infile], stdout=PIPE)
+    print(repr(['grep', '-vw', '^#', infile]))
     awk = Popen(['awk', '$1 != $2'], stdin=grep.stdout, stdout=PIPE)
     grep.stdout.close()
     output = awk.communicate()[0]
+
+    if grep.returncode == 2:
+        print grep.returncode
+        sys.exit()
 
     with open(matchfile, 'wb') as ofile:
         print 'Write to file %s' % matchfile
@@ -35,6 +41,7 @@ def filter_query(infile, matchfile):
 def filter_unique_hits(matchfile, outdir):
     """Filter blastn results to reduce redundancy"""
     print ">>> Filter blastn results to reduce redundancy"
+    print matchfile
     widict = {}
     wodict = {}
     querydict = {}
@@ -54,6 +61,7 @@ def filter_unique_hits(matchfile, outdir):
                 querydict[line[0]] = [[line[1], line[7], line[9]]]
             else:
                 querydict[line[0]].append([line[1], line[7], line[9]])
+
         queryset = sorted(set(querylist))
         # open output file writer handler
         wiwriter = csv.writer(wi_outfile, delimiter='\t', quoting=csv.QUOTE_MINIMAL)
@@ -82,6 +90,8 @@ def wifile_rmlist(within_specie, outdir):
     rm_file = os.path.join(outdir, 'query_rmlist.txt')
     with open(rm_file, 'wb') as rmfile, \
             open(within_specie, 'rb') as infile:
+        # skip the first line as header
+        next(infile)
         for line in csv.reader(infile, dialect='excel-tab'):
             # contains duplicate sequnces in output file
             # if query is longer than ref within one specie
@@ -109,6 +119,7 @@ def wofile_rmlist(without_specie, outdir, reference):
             open(rm_file1, 'wb') as rmfile1, \
             open(rm_file2, 'wb') as rmfile2, \
             open(without_specie, 'rb') as infile:
+        next(infile)
         for line in csv.reader(infile, dialect='excel-tab'):
             if line[0] not in querydict:          
                 querydict[line[0]] = [line[1]] 
@@ -158,27 +169,27 @@ def main():
     args = parser.parse_args()
     if not os.path.exists(args.outdir):
         os.makedirs(args.outdir)
+    outdir = os.path.abspath(args.outdir)
     base_query = os.path.basename(args.query.name)
     base_ref = os.path.basename(args.ref.name)
     # blastn outfile name
     bloutfile = '%s_%s_perc%d.blastn.outfile' % (os.path.splitext(base_query)[0], \
                                        os.path.splitext(base_ref)[0], \
                                        args.percid)
-    path_bloutfile = os.path.join(args.outdir, bloutfile)
+    path_bloutfile = os.path.join(outdir, bloutfile)
 
     # filter query seq outfile name
     matchfile = '%s_match_seq.tsv' % (os.path.splitext(base_query)[0])
-    path_matchfile = os.path.join(args.outdir, matchfile)
-    print path_matchfile
+    path_matchfile = os.path.join(outdir, matchfile)
 
     # run blastn
-    run_blastn(args.query.name, args.ref.name, args.outdir, str(args.percid), path_bloutfile)    
+    run_blastn(args.query.name, args.ref.name, outdir, str(args.percid), path_bloutfile)    
     # filter blastn output gain only matching information
     filter_query(path_bloutfile, path_matchfile)
     # run filter unique hits and categorize within specie match, without specie match
-    wifile, wofile = filter_unique_hits(path_matchfile, args.outdir)
-    wifile_rmlist(wifile, args.outdir)
-    wofile_rmlist(wofile, args.outdir, args.ref.name)
+    wifile, wofile = filter_unique_hits(path_matchfile, outdir)
+    wifile_rmlist(wifile, outdir)
+    wofile_rmlist(wofile, outdir, args.ref.name)
     
     print 'finish analyzing' + matchfile
     sys.stdout.flush()
